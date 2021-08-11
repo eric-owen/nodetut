@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const validator = require('validator');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const userSchema = new mongoose.Schema({
   name: {
@@ -40,22 +41,53 @@ const userSchema = new mongoose.Schema({
   email: {
     type: String,
     required: true,
+    unique: true,
     validate(value) {
-      if (!validator.isEmail(value)) {
-        throw new Error('email not valid');
-      }
+      if (!validator.isEmail(value)) throw new Error('email not valid');
     },
     trim: true,
     lowercase: true,
   },
+
+  tokens: [{
+    token: {
+      type: String,
+      required: true,
+    },
+  }],
 });
 
-userSchema.pre('save', async function (next) {
+userSchema.methods.generateAuthToken = async function generate() {
   const user = this;
-  const hash = await bcrypt.hash(user.password, 8);
-  this.password = hash;
+  const token = jwt.sign({ _id: user._id.toString() }, 'testing');
+
+  user.tokens = user.tokens.concat({ token });
+  await user.save();
+
+  return token;
+};
+
+userSchema.statics.findByCredentials = async (email, password) => {
+  // eslint-disable-next-line no-use-before-define
+  const user = await User.findOne({ email });
+  if (!user) throw new Error('unable to login');
+
+  const isMatch = await bcrypt.compare(password, user.password);
+  if (!isMatch) throw new Error('unable to login');
+
+  return user;
+};
+
+userSchema.pre('save', async function hashPass(next) {
+  const user = this;
+
+  if (user.isModified('password')) {
+    user.password = await bcrypt.hash(user.password, 8);
+  }
+
   next();
 });
+
 const User = mongoose.model('User', userSchema);
 
 module.exports = User;
